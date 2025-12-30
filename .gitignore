@@ -1,0 +1,35 @@
+# SBOM artifacts (generated)
+*.spdx.json
+*.cdx.json
+sbom*.json
+
+# Trivy cache and reports
+.trivy/
+trivy-results.sarif
+
+# Cosign keys (should never be committed!)
+cosign.key
+cosign.pub
+*.pem
+
+# Go
+app/supply-chain-lab
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/
+
+# Terraform (if we add IaC later)
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl

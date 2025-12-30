@@ -1,0 +1,281 @@
+# =============================================================================
+# Supply Chain Security Pipeline
+# =============================================================================
+# This workflow demonstrates a complete supply chain security pipeline:
+#
+# 1. Build       - Multi-stage hardened container image
+# 2. Scan        - Vulnerability scanning with Trivy
+# 3. SBOM        - Software Bill of Materials with Syft
+# 4. Sign        - Keyless signing with Cosign/Sigstore
+# 5. Attest      - Build provenance attestation (SLSA)
+# 6. Push        - Publish to GHCR with all attestations
+#
+# Zero Secrets Required! Uses OIDC for keyless operations.
+# =============================================================================
+
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ===========================================================================
+  # Build and Push Container Image
+  # ===========================================================================
+  build:
+    name: Build, Scan, Sign & Attest
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write      # Required for OIDC (keyless signing)
+      attestations: write  # Required for GitHub attestations
+      security-events: write  # Required for Trivy SARIF upload
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Setup
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set build metadata
+        id: vars
+        run: |
+          echo "build_time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+          echo "git_commit=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # Install Security Tools
+      # -----------------------------------------------------------------------
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Install Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          hide-progress: true
+          skip-files: 'go.sum'
+          exit-code: '0'  # Don't fail on this initial run
+
+      # -----------------------------------------------------------------------
+      # Build Container Image
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.vars.outputs.version }}
+            BUILD_TIME=${{ steps.vars.outputs.build_time }}
+            GIT_COMMIT=${{ steps.vars.outputs.git_commit }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      # -----------------------------------------------------------------------
+      # Security Scanning (Trivy)
+      # -----------------------------------------------------------------------
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+        if: github.event_name != 'pull_request'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        if: github.event_name != 'pull_request'
+
+      - name: Scan and fail on critical vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+          ignore-unfixed: true
+        if: github.event_name != 'pull_request'
+
+      # -----------------------------------------------------------------------
+      # Generate SBOM (Software Bill of Materials)
+      # -----------------------------------------------------------------------
+      - name: Generate SBOM with Syft
+        run: |
+          syft ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \
+            --output spdx-json=sbom.spdx.json \
+            --output cyclonedx-json=sbom.cdx.json
+        if: github.event_name != 'pull_request'
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.spdx.json
+            sbom.cdx.json
+        if: github.event_name != 'pull_request'
+
+      # -----------------------------------------------------------------------
+      # Sign Image with Cosign (Keyless via Sigstore)
+      # -----------------------------------------------------------------------
+      - name: Sign container image (keyless)
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        if: github.event_name != 'pull_request'
+
+      - name: Attest SBOM to image
+        run: |
+          cosign attest --yes \
+            --type spdxjson \
+            --predicate sbom.spdx.json \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        if: github.event_name != 'pull_request'
+
+      # -----------------------------------------------------------------------
+      # GitHub Native Attestations (SLSA Provenance)
+      # -----------------------------------------------------------------------
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+        if: github.event_name != 'pull_request'
+
+      # -----------------------------------------------------------------------
+      # Summary
+      # -----------------------------------------------------------------------
+      - name: Generate summary
+        run: |
+          echo "## Supply Chain Security Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Image" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Security Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Vulnerability Scan | Trivy |" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM (SPDX) | Generated |" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM (CycloneDX) | Generated |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cosign Signature | Keyless (Sigstore) |" >> $GITHUB_STEP_SUMMARY
+          echo "| SBOM Attestation | Attached |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Provenance | GitHub Attestations |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Verify Commands" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Verify signature" >> $GITHUB_STEP_SUMMARY
+          echo "cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# View SBOM attestation" >> $GITHUB_STEP_SUMMARY
+          echo "cosign verify-attestation ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --type spdxjson \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        if: github.event_name != 'pull_request'
+
+  # ===========================================================================
+  # Verify (Consumer Perspective)
+  # ===========================================================================
+  verify:
+    name: Verify Supply Chain
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify image signature
+        run: |
+          echo "Verifying image signature..."
+          cosign verify \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} \
+            --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+          echo "Signature verified!"
+
+      - name: Verify SBOM attestation
+        run: |
+          echo "Verifying SBOM attestation..."
+          cosign verify-attestation \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} \
+            --type spdxjson \
+            --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' | head -50
+          echo "SBOM attestation verified!"
+
+      - name: Download and inspect SBOM
+        run: |
+          echo "Downloading SBOM from attestation..."
+          cosign verify-attestation \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} \
+            --type spdxjson \
+            --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            | jq -r '.payload' | base64 -d | jq '.predicate.packages[:5]'
+          echo ""
+          echo "SBOM downloaded and verified!"
