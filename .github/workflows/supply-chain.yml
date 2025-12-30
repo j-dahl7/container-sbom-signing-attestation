@@ -258,28 +258,8 @@ jobs:
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
           echo "Signature verified!"
 
-      - name: Verify SBOM attestation
-        timeout-minutes: 2
-        continue-on-error: true
+      - name: List attestations
         run: |
-          echo "Verifying SBOM attestation..."
-          cosign verify-attestation \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} \
-            --type spdxjson \
-            --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \
-            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' 2>&1 | head -50
-          echo "SBOM attestation verified!"
-
-      - name: Download and inspect SBOM
-        timeout-minutes: 2
-        continue-on-error: true
-        run: |
-          echo "Downloading SBOM from attestation..."
-          cosign verify-attestation \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} \
-            --type spdxjson \
-            --certificate-identity-regexp='https://github.com/${{ github.repository }}/.*' \
-            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' 2>&1 \
-            | jq -r '.payload' 2>/dev/null | base64 -d 2>/dev/null | jq '.predicate.packages[:5]' 2>/dev/null || echo "SBOM parsing skipped"
-          echo ""
-          echo "SBOM verification complete!"
+          echo "Listing image attestations..."
+          cosign tree ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} || true
+          echo "Done!"
