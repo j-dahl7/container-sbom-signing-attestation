@@ -1,6 +1,6 @@
-# Supply Chain Security Lab
+# Container SBOM, Signing & Attestation Lab
 
-> **Companion repo for the blog post: [Secure Your Container Supply Chain: SBOM, Signing & Attestation with GitHub Actions](https://nineliveszerotrust.com/blog/supply-chain-security/)**
+> **Companion repo for the blog post: [Secure Your Container Supply Chain: SBOM, Signing & Attestation with GitHub Actions](https://nineliveszerotrust.com/blog/container-sbom-signing-attestation/)**
 
 This hands-on lab demonstrates a complete container supply chain security pipeline using **zero secrets** - everything is keyless via OIDC and Sigstore.
 
@@ -68,8 +68,8 @@ curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -
 
 ```bash
 # Clone the repo
-git clone https://github.com/j-dahl7/supply-chain-lab.git
-cd supply-chain-lab
+git clone https://github.com/j-dahl7/container-sbom-signing-attestation.git
+cd container-sbom-signing-attestation
 
 # Build and scan locally
 ./scripts/local-build.sh
@@ -90,7 +90,7 @@ IMAGE="ghcr.io/j-dahl7/supply-chain-lab@sha256:..."
 ## Lab Structure
 
 ```
-supply-chain-lab/
+container-sbom-signing-attestation/
 ├── .github/workflows/
 │   └── supply-chain.yml      # Full CI/CD pipeline
 ├── app/
@@ -128,7 +128,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 
 ```bash
 # Scan for vulnerabilities
-trivy image ghcr.io/j-dahl7/supply-chain-lab:latest
+trivy image ghcr.io/j-dahl7/container-sbom-signing-attestation:latest
 
 # CI/CD blocks on CRITICAL vulnerabilities
 trivy image --exit-code 1 --severity CRITICAL <image>
@@ -190,17 +190,17 @@ cosign verify ghcr.io/org/image@sha256:... \
 ### Verify Signature
 
 ```bash
-cosign verify ghcr.io/j-dahl7/supply-chain-lab@sha256:... \
-  --certificate-identity-regexp='https://github.com/j-dahl7/supply-chain-lab/.*' \
+cosign verify ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:... \
+  --certificate-identity-regexp='https://github.com/j-dahl7/container-sbom-signing-attestation/.*' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
 ### Verify SBOM Attestation
 
 ```bash
-cosign verify-attestation ghcr.io/j-dahl7/supply-chain-lab@sha256:... \
+cosign verify-attestation ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:... \
   --type spdxjson \
-  --certificate-identity-regexp='https://github.com/j-dahl7/supply-chain-lab/.*' \
+  --certificate-identity-regexp='https://github.com/j-dahl7/container-sbom-signing-attestation/.*' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
@@ -270,7 +270,7 @@ cosign verify --key cosign.pub <image>
 
 ## Resources
 
-- **Blog Post:** [Secure Your Container Supply Chain](https://nineliveszerotrust.com/blog/supply-chain-security/)
+- **Blog Post:** [Secure Your Container Supply Chain](https://nineliveszerotrust.com/blog/container-sbom-signing-attestation/)
 - **Sigstore:** https://sigstore.dev
 - **Cosign:** https://github.com/sigstore/cosign
 - **Syft:** https://github.com/anchore/syft
