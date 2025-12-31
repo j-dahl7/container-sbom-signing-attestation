@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="social-preview.png" alt="Container Supply Chain Security Pipeline" width="800">
+</p>
+
 # Container SBOM, Signing & Attestation Lab
 
 > **Companion repo for the blog post: [Secure Your Container Supply Chain: SBOM, Signing & Attestation with GitHub Actions](https://nineliveszerotrust.com/blog/container-sbom-signing-attestation/)**
