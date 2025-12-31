@@ -47,7 +47,7 @@ LABEL org.opencontainers.image.title="Supply Chain Demo"
 LABEL org.opencontainers.image.description="Demo app for supply chain security with signing and attestation"
 LABEL org.opencontainers.image.vendor="Nine Lives Zero Trust"
 LABEL org.opencontainers.image.licenses="MIT"
-LABEL org.opencontainers.image.source="https://github.com/j-dahl7/supply-chain-lab"
+LABEL org.opencontainers.image.source="https://github.com/j-dahl7/container-sbom-signing-attestation"
 
 # Copy binary from builder
 COPY --from=builder /app /app
