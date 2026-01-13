@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="social-preview.svg" alt="Container Supply Chain Security Pipeline" width="800">
+  <img src="https://nineliveszerotrust.com/images/blog/supply-chain/pipeline-hero.png" alt="Container Supply Chain Security Pipeline" width="800">
 </p>
 
 # Container SBOM, Signing & Attestation Lab
