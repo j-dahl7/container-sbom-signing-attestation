@@ -19,6 +19,14 @@ NC='\033[0m'
 
 IMAGE_NAME="supply-chain-demo"
 IMAGE_TAG="local"
+CONTAINER_ID=""
+
+cleanup() {
+    if [[ -n "$CONTAINER_ID" ]]; then
+        docker rm -f "$CONTAINER_ID" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Local Build & Scan${NC}"
@@ -65,7 +73,7 @@ echo -e "${BLUE}[4/4] Testing container...${NC}"
 CONTAINER_ID=$(docker run -d -p 8080:8080 "${IMAGE_NAME}:${IMAGE_TAG}")
 sleep 2
 
-if curl -s http://localhost:8080/health | jq .; then
+if curl --fail --silent --show-error http://localhost:8080/health | jq .; then
     echo -e "${GREEN}Container is healthy!${NC}"
 else
     echo -e "${RED}Container health check failed${NC}"
@@ -73,6 +81,7 @@ fi
 
 docker stop "$CONTAINER_ID" >/dev/null
 docker rm "$CONTAINER_ID" >/dev/null
+CONTAINER_ID=""
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

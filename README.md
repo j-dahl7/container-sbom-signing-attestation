@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://nineliveszerotrust.com/images/blog/supply-chain/pipeline-hero.png" alt="Container Supply Chain Security Pipeline" width="800">
+  <img src="https://nineliveszerotrust.com/images/blog/container-sbom-signing-attestation/pipeline-hero.png" alt="Container Supply Chain Security Pipeline" width="800">
 </p>
 
 # Container SBOM, Signing & Attestation Lab
@@ -7,6 +7,10 @@
 > **Companion repo for the blog post: [Secure Your Container Supply Chain: SBOM, Signing & Attestation with GitHub Actions](https://nineliveszerotrust.com/blog/container-sbom-signing-attestation/)**
 
 This hands-on lab demonstrates a complete container supply chain security pipeline using **zero secrets** - everything is keyless via OIDC and Sigstore.
+
+## Verification status
+
+**Last reviewed: 2026-07-10 — verified locally, deployment-dependent.** The Go application, health probe, shell syntax, workflow structure, action pins, Dockerfile configuration, and documentation/code references were reviewed. Pull requests now run in a separate read-only validation job, while publishing and OIDC signing are restricted to `main` and `v*` tag refs. This review did not publish a new GHCR image or perform a live GitHub OIDC signing ceremony, so signature, transparency-log, and attestation checks still require a successful trusted workflow run in this repository.
 
 ## What You'll Learn
 
@@ -61,7 +65,7 @@ This hands-on lab demonstrates a complete container supply chain security pipeli
 
 ```bash
 # Install tools (macOS)
-brew install cosign syft trivy jq docker
+brew install cosign syft trivy gh jq docker
 
 # Or install individually
 go install github.com/sigstore/cosign/v2/cmd/cosign@latest
@@ -83,11 +87,27 @@ cd container-sbom-signing-attestation
 
 ```bash
 # Get the image digest from GHCR
-IMAGE="ghcr.io/j-dahl7/supply-chain-lab@sha256:..."
+IMAGE="ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:..."
+
+# The provenance verifier uses GitHub CLI and the OCI registry.
+gh auth login
+docker login ghcr.io
 
 # Run verification
 ./scripts/verify-image.sh $IMAGE
 ```
+
+The verification script fails closed: the image signature, SPDX SBOM attestation, and GitHub SLSA provenance must all validate against this repository's trusted workflow identity.
+
+---
+
+## Permissions, cost, and cleanup
+
+- GitHub Actions must be allowed to write packages and attestations. Only the trusted release job receives package, attestation, security-event, and OIDC permissions; pull requests receive `contents: read` only and cannot populate the release cache. The release uses the automatic, short-lived `GITHUB_TOKEN` and OIDC identity.
+- Manual release dispatches fail unless the selected ref is `main` or a `v*` tag. Protect both the branch and release-tag namespace with repository rulesets.
+- GitHub-hosted runner minutes, artifact retention, and GHCR storage/egress can be billable depending on the account plan and repository visibility. No Azure, AWS, or GCP resources are created.
+- Local cleanup: remove the `supply-chain-demo:local` image and generated `sbom.spdx.json` / `sbom.cdx.json` files after the lab.
+- Registry cleanup is intentionally manual: delete unwanted versions from the repository package page only after confirming that no consumer relies on their immutable digests.
 
 ---
 
@@ -115,7 +135,7 @@ container-sbom-signing-attestation/
 
 ```dockerfile
 # Multi-stage build with distroless base
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26.5-alpine AS builder
 # ... build steps ...
 
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -160,7 +180,7 @@ cosign sign --yes ghcr.io/org/image@sha256:...
 
 # Verify (anywhere)
 cosign verify ghcr.io/org/image@sha256:... \
-  --certificate-identity-regexp='https://github.com/org/repo/.*' \
+  --certificate-identity-regexp='^https://github\.com/org/repo/\.github/workflows/supply-chain\.yml@refs/(heads/main|tags/v[^/]+)$' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
@@ -175,7 +195,7 @@ cosign verify ghcr.io/org/image@sha256:... \
 
 ```yaml
 # GitHub native attestations
-- uses: actions/attest-build-provenance@v1
+- uses: actions/attest-build-provenance@v4
   with:
     subject-name: ghcr.io/org/image
     subject-digest: ${{ steps.build.outputs.digest }}
@@ -195,7 +215,7 @@ cosign verify ghcr.io/org/image@sha256:... \
 
 ```bash
 cosign verify ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:... \
-  --certificate-identity-regexp='https://github.com/j-dahl7/container-sbom-signing-attestation/.*' \
+  --certificate-identity-regexp='^https://github\.com/j-dahl7/container-sbom-signing-attestation/\.github/workflows/supply-chain\.yml@refs/(heads/main|tags/v[^/]+)$' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
@@ -204,7 +224,7 @@ cosign verify ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:... \
 ```bash
 cosign verify-attestation ghcr.io/j-dahl7/container-sbom-signing-attestation@sha256:... \
   --type spdxjson \
-  --certificate-identity-regexp='https://github.com/j-dahl7/container-sbom-signing-attestation/.*' \
+  --certificate-identity-regexp='^https://github\.com/j-dahl7/container-sbom-signing-attestation/\.github/workflows/supply-chain\.yml@refs/(heads/main|tags/v[^/]+)$' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
 ```
 
@@ -213,6 +233,15 @@ cosign verify-attestation ghcr.io/j-dahl7/container-sbom-signing-attestation@sha
 ```bash
 cosign verify-attestation <image@digest> --type spdxjson ... \
   | jq -r '.payload' | base64 -d | jq '.predicate'
+```
+
+### Verify GitHub Build Provenance
+
+```bash
+gh attestation verify "oci://<image@digest>" \
+  --repo j-dahl7/container-sbom-signing-attestation \
+  --cert-identity-regex='^https://github\.com/j-dahl7/container-sbom-signing-attestation/\.github/workflows/supply-chain\.yml@refs/(heads/main|tags/v[^/]+)$' \
+  --predicate-type='https://slsa.dev/provenance/v1'
 ```
 
 ### View in Rekor Transparency Log
@@ -243,7 +272,7 @@ rekor-cli search --email your-github-username@users.noreply.github.com
 The image might not be signed, or you're using the wrong identity pattern:
 
 ```bash
-# Check what identity signed the image
+# Diagnostic only: inspect the signer, then return to the strict policy above.
 cosign verify <image> --certificate-identity-regexp='.*' \
   --certificate-oidc-issuer='https://token.actions.githubusercontent.com' 2>&1 | head -20
 ```

@@ -11,12 +11,17 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build
 # -----------------------------------------------------------------------------
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
 
-# Security: Don't run as root during build
-RUN adduser -D -u 10001 appuser
+# Security: compile as an unprivileged user with writable caches isolated in /tmp.
+RUN adduser -D -u 10001 appuser \
+    && mkdir -p /build \
+    && chown appuser:appuser /build
 
 WORKDIR /build
+ENV GOMODCACHE=/tmp/go-mod-cache \
+    GOCACHE=/tmp/go-build-cache
+USER appuser
 
 # Copy dependency files first (better layer caching)
 COPY app/go.mod ./
@@ -35,12 +40,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
         -X main.Version=${VERSION} \
         -X main.BuildTime=${BUILD_TIME} \
         -X main.GitCommit=${GIT_COMMIT}" \
-    -o /app main.go
+    -o /build/app main.go
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (Distroless)
 # -----------------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
 
 # OCI Image Labels (used by SBOM tools and registries)
 LABEL org.opencontainers.image.title="Supply Chain Demo"
@@ -50,7 +55,7 @@ LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/j-dahl7/container-sbom-signing-attestation"
 
 # Copy binary from builder
-COPY --from=builder /app /app
+COPY --from=builder /build/app /app
 
 # Expose port
 EXPOSE 8080
@@ -60,6 +65,6 @@ USER nonroot:nonroot
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/app", "-health-check"] || exit 1
+    CMD ["/app", "-health-check"]
 
 ENTRYPOINT ["/app"]
