@@ -41,7 +41,7 @@ tests/                       Offline security contract tests
 
 ## Validate locally
 
-Python 3, Bash, Go 1.22+, and Docker are required. Trivy and Syft are required
+Python 3, Bash, Go 1.24.13+, and Docker are required. Trivy and Syft are required
 for the full local supply-chain exercise.
 
 ```bash

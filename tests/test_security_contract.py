@@ -114,6 +114,12 @@ class SupplyChainContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertEqual(len(re.findall(r"(?m)^FROM .*@sha256:[0-9a-f]{64}", dockerfile)), 2)
 
+    def test_builder_uses_reviewed_fixed_go_toolchain(self) -> None:
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        go_mod = (ROOT / "app" / "go.mod").read_text(encoding="utf-8")
+        self.assertIn("golang:1.24.13-alpine@sha256:", dockerfile)
+        self.assertRegex(go_mod, r"(?m)^go 1\.24\.13$")
+
     def test_local_build_fails_closed_on_scanning_and_health(self) -> None:
         local_build = (ROOT / "scripts" / "local-build.sh").read_text(encoding="utf-8")
         self.assertIn("trivy image", local_build)
