@@ -114,11 +114,41 @@ class SupplyChainContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertEqual(len(re.findall(r"(?m)^FROM .*@sha256:[0-9a-f]{64}", dockerfile)), 2)
 
+    #: Go releases below this are affected by the fixed critical TLS advisory
+    #: that prompted the original pin. Raise this floor on a bump; never lower
+    #: it. Pinning one exact version here instead made every future patch bump
+    #: fail this test, which is why Dependabot could not land a Go update alone.
+    MINIMUM_GO_VERSION = (1, 24, 13)
+
     def test_builder_uses_reviewed_fixed_go_toolchain(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         go_mod = (ROOT / "app" / "go.mod").read_text(encoding="utf-8")
-        self.assertIn("golang:1.24.13-alpine@sha256:", dockerfile)
-        self.assertRegex(go_mod, r"(?m)^go 1\.24\.13$")
+
+        image = re.search(
+            r"(?m)^FROM golang:(\d+\.\d+\.\d+)-alpine@sha256:[0-9a-f]{64}", dockerfile
+        )
+        self.assertIsNotNone(
+            image, "builder image must pin an exact golang patch release by digest"
+        )
+        declared = re.search(r"(?m)^go (\d+\.\d+\.\d+)$", go_mod)
+        self.assertIsNotNone(declared, "go.mod must declare an exact patch release")
+
+        image_version = tuple(int(part) for part in image.group(1).split("."))
+        module_version = tuple(int(part) for part in declared.group(1).split("."))
+
+        # The toolchain that compiles the binary and the version the module
+        # declares must move together; drift means the build and the source
+        # disagree about which runtime fixes are present.
+        self.assertEqual(
+            image_version,
+            module_version,
+            "Dockerfile golang tag and go.mod version must match",
+        )
+        self.assertGreaterEqual(
+            image_version,
+            self.MINIMUM_GO_VERSION,
+            "Go toolchain is below the reviewed security floor",
+        )
 
     def test_local_build_fails_closed_on_scanning_and_health(self) -> None:
         local_build = (ROOT / "scripts" / "local-build.sh").read_text(encoding="utf-8")
