@@ -41,7 +41,7 @@ tests/                       Offline security contract tests
 
 ## Validate locally
 
-Python 3, Bash, Go 1.24.13+, and Docker are required. Trivy and Syft are required
+Python 3, Bash, Go 1.26.5+, and Docker are required. Trivy and Syft are required
 for the full local supply-chain exercise.
 
 ```bash
@@ -69,6 +69,9 @@ The repository argument is security policy, not display metadata. Use the
 repository that owns this workflow; do not replace it with a wildcard. The
 script exits nonzero unless the signature, SPDX SBOM, and one accepted SLSA
 provenance predicate all match the same exact workflow identity.
+Because registry evidence can appear moments after its image manifest, each
+read-only verification is retried up to five times with bounded exponential
+backoff. Persistently missing or invalid evidence still fails closed.
 
 ## Pipeline
 
@@ -103,6 +106,10 @@ Review Dependabot proposals for Action SHAs, Docker digests, and Go modules.
 The `check-pinned-refs.sh` guard blocks mutable replacements such as
 `actions/checkout@v4` or `FROM image:tag`. Digest pinning preserves reviewable
 inputs; it does not remove the need to apply security updates promptly.
+The `go` directive records the oldest supported toolchain. The digest-pinned
+Docker builder may be newer, allowing an independent Docker Dependabot security
+update as long as it remains at or above both that module minimum and the
+reviewed Go 1.26.5 security baseline.
 
 ## License
 

@@ -38,12 +38,22 @@ class SupplyChainContractTests(unittest.TestCase):
                     r"""#!/usr/bin/env bash
                     set -eu
                     printf '%s\\n' "$*" >> "$COSIGN_LOG"
-                    case "$COSIGN_FAILURE:$*" in
-                      signature:verify\ *) exit 1 ;;
-                      sbom:verify-attestation\ *--type\ spdxjson*) exit 1 ;;
-                      provenance:verify-attestation\ *--type\ slsaprovenance*) exit 1 ;;
-                      provenance:verify-attestation\ *--type\ https://slsa.dev/provenance/v1*) exit 1 ;;
+                    evidence=none
+                    case "$*" in
+                      verify\ *) evidence=signature ;;
+                      verify-attestation\ *--type\ spdxjson*) evidence=sbom ;;
+                      verify-attestation\ *--type\ slsaprovenance*|verify-attestation\ *--type\ https://slsa.dev/provenance/v1*) evidence=provenance ;;
                     esac
+                    if [[ "$COSIGN_FAILURE" == "$evidence" ]]; then
+                      exit 1
+                    fi
+                    if [[ "$COSIGN_FAILURE" == "${evidence}_once" ]]; then
+                      marker="${COSIGN_LOG}.${evidence}.failed"
+                      if [[ ! -f "$marker" ]]; then
+                        : > "$marker"
+                        exit 1
+                      fi
+                    fi
                     exit 0
                     """
                 ).encode("utf-8"),
@@ -54,6 +64,7 @@ class SupplyChainContractTests(unittest.TestCase):
                     f"COSIGN_BIN={shlex.quote(bash_path(cosign))}",
                     f"COSIGN_LOG={shlex.quote(bash_path(log))}",
                     f"COSIGN_FAILURE={shlex.quote(failure)}",
+                    "VERIFY_RETRY_DELAY_SECONDS=0",
                     shlex.quote(bash_path(VERIFY)),
                     shlex.quote(IMAGE),
                     shlex.quote(REPOSITORY),
@@ -79,13 +90,33 @@ class SupplyChainContractTests(unittest.TestCase):
         self.assertRegex(log, r"--type (slsaprovenance|https://slsa.dev/provenance/v1)")
 
     def test_missing_signature_fails_closed(self) -> None:
-        self.assertEqual(self.run_verifier("signature").returncode, 1)
+        result = self.run_verifier("signature")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.cosign_log.count("verify "), 5)  # type: ignore[attr-defined]
 
     def test_missing_sbom_fails_closed(self) -> None:
-        self.assertEqual(self.run_verifier("sbom").returncode, 1)
+        result = self.run_verifier("sbom")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.cosign_log.count("--type spdxjson"), 5)  # type: ignore[attr-defined]
 
     def test_missing_provenance_fails_closed(self) -> None:
-        self.assertEqual(self.run_verifier("provenance").returncode, 1)
+        result = self.run_verifier("provenance")
+        self.assertEqual(result.returncode, 1)
+        # Each bounded attempt checks both accepted provenance predicate types.
+        self.assertEqual(result.cosign_log.count("--type slsaprovenance"), 5)  # type: ignore[attr-defined]
+        self.assertEqual(result.cosign_log.count("--type https://slsa.dev/provenance/v1"), 5)  # type: ignore[attr-defined]
+
+    def test_transient_registry_visibility_is_retried(self) -> None:
+        result = self.run_verifier("signature_once")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.cosign_log.count("verify "), 2)  # type: ignore[attr-defined]
+        self.assertIn("attempt 1/5 failed", result.stderr)
+
+    def test_registry_retry_policy_is_bounded(self) -> None:
+        verifier = VERIFY.read_text(encoding="utf-8")
+        self.assertIn("readonly MAX_VERIFY_ATTEMPTS=5", verifier)
+        self.assertIn("readonly MAX_RETRY_DELAY_SECONDS=30", verifier)
+        self.assertIn("delay_seconds > MAX_RETRY_DELAY_SECONDS", verifier)
 
     def test_incomplete_digest_is_rejected_before_cosign(self) -> None:
         result = subprocess.run(
@@ -114,11 +145,10 @@ class SupplyChainContractTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertEqual(len(re.findall(r"(?m)^FROM .*@sha256:[0-9a-f]{64}", dockerfile)), 2)
 
-    #: Go releases below this are affected by the fixed critical TLS advisory
-    #: that prompted the original pin. Raise this floor on a bump; never lower
-    #: it. Pinning one exact version here instead made every future patch bump
-    #: fail this test, which is why Dependabot could not land a Go update alone.
-    MINIMUM_GO_VERSION = (1, 24, 13)
+    #: This is the most recent reviewed security baseline. A Docker-only
+    #: Dependabot patch may move the builder above it, but neither the module's
+    #: minimum nor the builder may move below it in a coordinated downgrade.
+    MINIMUM_GO_VERSION = (1, 26, 5)
 
     def test_builder_uses_reviewed_fixed_go_toolchain(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -136,19 +166,32 @@ class SupplyChainContractTests(unittest.TestCase):
         image_version = tuple(int(part) for part in image.group(1).split("."))
         module_version = tuple(int(part) for part in declared.group(1).split("."))
 
-        # The toolchain that compiles the binary and the version the module
-        # declares must move together; drift means the build and the source
-        # disagree about which runtime fixes are present.
-        self.assertEqual(
+        # The go directive is a minimum required Go version, not a request for
+        # byte-for-byte equality with the build image. Allowing a newer builder
+        # lets Docker Dependabot land a security patch without requiring an
+        # unrelated gomod-ecosystem update in the same pull request.
+        self.assertGreaterEqual(
             image_version,
             module_version,
-            "Dockerfile golang tag and go.mod version must match",
+            "builder toolchain must satisfy the minimum version in go.mod",
         )
         self.assertGreaterEqual(
             image_version,
             self.MINIMUM_GO_VERSION,
             "Go toolchain is below the reviewed security floor",
         )
+        self.assertGreaterEqual(
+            module_version,
+            self.MINIMUM_GO_VERSION,
+            "go.mod minimum is below the reviewed security floor",
+        )
+
+    def test_shell_scripts_are_lf_normalized_for_windows_checkouts(self) -> None:
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertRegex(attributes, r"(?m)^\*\.sh text eol=lf$")
+        for script in sorted(ROOT.rglob("*.sh")):
+            with self.subTest(script=script.relative_to(ROOT)):
+                self.assertNotIn(b"\r\n", script.read_bytes())
 
     def test_local_build_fails_closed_on_scanning_and_health(self) -> None:
         local_build = (ROOT / "scripts" / "local-build.sh").read_text(encoding="utf-8")
