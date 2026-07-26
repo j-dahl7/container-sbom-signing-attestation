@@ -1,87 +1,71 @@
-#!/bin/bash
-# =============================================================================
-# Local Build and Scan Script
-# =============================================================================
-# Build and scan the container image locally without pushing.
-# Great for testing before CI/CD.
-#
-# Usage: ./scripts/local-build.sh
-# =============================================================================
+#!/usr/bin/env bash
+# Build, scan, inventory, and smoke-test locally without publishing.
 
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+readonly IMAGE_NAME="supply-chain-demo"
+readonly IMAGE_TAG="local"
 
-IMAGE_NAME="supply-chain-demo"
-IMAGE_TAG="local"
+missing=()
+for tool in docker trivy syft curl; do
+  command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "ERROR: missing required tools: ${missing[*]}" >&2
+  exit 2
+fi
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}Local Build & Scan${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
+container_id=""
+cleanup() {
+  if [[ -n "$container_id" ]]; then
+    docker rm -f "$container_id" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
-# Build
-echo -e "${BLUE}[1/4] Building image...${NC}"
+echo "[1/5] Enforcing immutable references"
+bash scripts/check-pinned-refs.sh
+
+echo "[2/5] Building the local image"
 docker build \
-    --build-arg VERSION=local \
-    --build-arg BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-    --build-arg GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')" \
-    -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-    .
+  --build-arg VERSION=local \
+  --build-arg BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+  --build-arg GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+  -t "${IMAGE_NAME}:${IMAGE_TAG}" \
+  .
 
-echo -e "${GREEN}Build complete!${NC}"
-echo ""
+echo "[3/5] Failing on critical vulnerabilities"
+trivy image \
+  --exit-code 1 \
+  --ignore-unfixed \
+  --severity CRITICAL \
+  "${IMAGE_NAME}:${IMAGE_TAG}"
 
-# Scan with Trivy
-echo -e "${BLUE}[2/4] Scanning for vulnerabilities (Trivy)...${NC}"
-if command -v trivy >/dev/null 2>&1; then
-    trivy image --severity HIGH,CRITICAL "${IMAGE_NAME}:${IMAGE_TAG}"
-else
-    echo -e "${YELLOW}Trivy not installed. Install with: brew install trivy${NC}"
-fi
-echo ""
+echo "[4/5] Generating SPDX and CycloneDX SBOMs"
+syft "${IMAGE_NAME}:${IMAGE_TAG}" --output spdx-json=sbom.spdx.json
+syft "${IMAGE_NAME}:${IMAGE_TAG}" --output cyclonedx-json=sbom.cdx.json
 
-# Generate SBOM with Syft
-echo -e "${BLUE}[3/4] Generating SBOM (Syft)...${NC}"
-if command -v syft >/dev/null 2>&1; then
-    syft "${IMAGE_NAME}:${IMAGE_TAG}" -o table
-    echo ""
-    echo "Generating SBOM files..."
-    syft "${IMAGE_NAME}:${IMAGE_TAG}" -o spdx-json > sbom.spdx.json
-    syft "${IMAGE_NAME}:${IMAGE_TAG}" -o cyclonedx-json > sbom.cdx.json
-    echo -e "${GREEN}SBOMs saved: sbom.spdx.json, sbom.cdx.json${NC}"
-else
-    echo -e "${YELLOW}Syft not installed. Install with: brew install syft${NC}"
-fi
-echo ""
-
-# Test run
-echo -e "${BLUE}[4/4] Testing container...${NC}"
-CONTAINER_ID=$(docker run -d -p 8080:8080 "${IMAGE_NAME}:${IMAGE_TAG}")
-sleep 2
-
-if curl -s http://localhost:8080/health | jq .; then
-    echo -e "${GREEN}Container is healthy!${NC}"
-else
-    echo -e "${RED}Container health check failed${NC}"
+echo "[5/5] Running a fail-closed health check"
+container_id=$(docker run -d -p 127.0.0.1::8080 "${IMAGE_NAME}:${IMAGE_TAG}")
+published_port=$(docker port "$container_id" 8080/tcp | awk -F: 'NR == 1 {print $NF}')
+if [[ -z "$published_port" ]]; then
+  echo "ERROR: Docker did not publish the health port" >&2
+  exit 1
 fi
 
-docker stop "$CONTAINER_ID" >/dev/null
-docker rm "$CONTAINER_ID" >/dev/null
+healthy=false
+for _ in 1 2 3 4 5; do
+  if curl --fail --silent --show-error "http://127.0.0.1:${published_port}/health" >/dev/null; then
+    healthy=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$healthy" != true ]]; then
+  echo "ERROR: container health endpoint did not become ready" >&2
+  exit 1
+fi
 
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Local Build Complete${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
+echo "PASS: local image built, scanned, inventoried, and health-checked"
 echo "Image: ${IMAGE_NAME}:${IMAGE_TAG}"
-echo ""
-echo "Next steps:"
-echo "  1. Review vulnerability scan results above"
-echo "  2. Check SBOM files: sbom.spdx.json, sbom.cdx.json"
-echo "  3. Push to trigger CI/CD pipeline"
+echo "SBOMs: sbom.spdx.json, sbom.cdx.json"
