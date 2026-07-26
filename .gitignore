@@ -15,6 +15,10 @@ cosign.pub
 # Go
 app/supply-chain-lab
 
+# Python test cache
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 Thumbs.db
