@@ -41,7 +41,7 @@ tests/                       Offline security contract tests
 
 ## Validate locally
 
-Python 3, Bash, Go 1.26.5+, and Docker are required. Trivy and Syft are required
+Python 3, Bash, Go 1.26.8+, and Docker are required. Trivy and Syft are required
 for the full local supply-chain exercise.
 
 ```bash
@@ -56,8 +56,11 @@ produce a release image.
 
 ## Verify a published image
 
-Install Cosign, then pass both the immutable image reference and the expected
-GitHub repository:
+Install Cosign **v3.0.6**, the explicitly selected and tested workflow version,
+then pass both the immutable image reference and the expected GitHub repository.
+This is the supported verification baseline for the published Sigstore bundles;
+compatibility with older Cosign versions is not claimed. A legacy-format flag
+alone is not evidence that every signature and attestation format will verify.
 
 ```bash
 bash scripts/verify-image.sh \
@@ -109,7 +112,9 @@ inputs; it does not remove the need to apply security updates promptly.
 The `go` directive records the oldest supported toolchain. The digest-pinned
 Docker builder may be newer, allowing an independent Docker Dependabot security
 update as long as it remains at or above both that module minimum and the
-reviewed Go 1.26.5 security baseline.
+reviewed Go 1.26.8 security baseline. This keeps the existing supported 1.26
+series while incorporating its security and maintenance updates, rather than
+requiring a new major toolchain for this fix.
 
 ## License
 

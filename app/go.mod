@@ -1,3 +1,3 @@
 module github.com/j-dahl7/supply-chain-lab
 
-go 1.26.5
+go 1.26.8
