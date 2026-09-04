@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERIFY = ROOT / "scripts" / "verify-image.sh"
 IMAGE = "ghcr.io/example/supply-chain@sha256:" + "a" * 64
 REPOSITORY = "example/supply-chain"
+BASH = os.environ.get("BASH_BIN") or shutil.which("bash") or "bash"
 WSL_BASH = os.name == "nt" and subprocess.run(
-    ["bash", "-lc", "test -d /mnt/c"], check=False
+    [BASH, "-lc", "test -d /mnt/c"], check=False
 ).returncode == 0
 
 
@@ -71,7 +73,7 @@ class SupplyChainContractTests(unittest.TestCase):
                 ]
             )
             result = subprocess.run(
-                ["bash", "-lc", command],
+                [BASH, "-lc", command],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -120,7 +122,7 @@ class SupplyChainContractTests(unittest.TestCase):
 
     def test_incomplete_digest_is_rejected_before_cosign(self) -> None:
         result = subprocess.run(
-            ["bash", bash_path(VERIFY), "ghcr.io/example/image@sha256:abc", REPOSITORY],
+            [BASH, bash_path(VERIFY), "ghcr.io/example/image@sha256:abc", REPOSITORY],
             text=True,
             capture_output=True,
             check=False,
@@ -136,7 +138,7 @@ class SupplyChainContractTests(unittest.TestCase):
 
     def test_all_action_and_base_image_refs_are_immutable(self) -> None:
         result = subprocess.run(
-            ["bash", bash_path(ROOT / "scripts" / "check-pinned-refs.sh")],
+            [BASH, bash_path(ROOT / "scripts" / "check-pinned-refs.sh")],
             text=True,
             capture_output=True,
             check=False,
@@ -148,7 +150,7 @@ class SupplyChainContractTests(unittest.TestCase):
     #: This is the most recent reviewed security baseline. A Docker-only
     #: Dependabot patch may move the builder above it, but neither the module's
     #: minimum nor the builder may move below it in a coordinated downgrade.
-    MINIMUM_GO_VERSION = (1, 26, 5)
+    MINIMUM_GO_VERSION = (1, 26, 8)
 
     def test_builder_uses_reviewed_fixed_go_toolchain(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
