@@ -5,7 +5,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-python3 - "$repo_root" <<'PY'
+"${PYTHON_BIN:-python3}" - "$repo_root" <<'PY'
 from pathlib import Path
 import re
 import sys

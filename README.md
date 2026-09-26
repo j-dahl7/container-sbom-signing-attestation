@@ -41,7 +41,7 @@ tests/                       Offline security contract tests
 
 ## Validate locally
 
-Python 3, Bash, Go 1.26.8+, and Docker are required. Trivy and Syft are required
+Python 3, Bash, Go 1.26.8+, and Docker are required. Trivy 0.74.0+ and Syft 1.52.0+ are required
 for the full local supply-chain exercise.
 
 ```bash
@@ -53,6 +53,12 @@ bash scripts/local-build.sh
 
 The Docker build also runs the Go tests, so a failing application test cannot
 produce a release image.
+
+The runtime now uses a digest-pinned Debian 13 distroless image. Debian 12's
+distribution LTS does not mean its distroless image keeps receiving rebuilds.
+Scanner versions are pinned independently of action SHAs; an immutable action
+can otherwise keep installing an old scanner. With Git Bash on Windows, set
+`PYTHON_BIN` to the actual Python executable if `python3` is only a Store alias.
 
 ## Verify a published image
 
