@@ -22,7 +22,7 @@ RUN go test ./... && \
         -X main.GitCommit=${GIT_COMMIT}" \
       -o /app .
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
 
 LABEL org.opencontainers.image.title="Supply Chain Demo"
 LABEL org.opencontainers.image.description="Demo app for supply chain security with signing and attestation"
