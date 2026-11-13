@@ -150,7 +150,7 @@ class SupplyChainContractTests(unittest.TestCase):
     #: This is the most recent reviewed security baseline. A Docker-only
     #: Dependabot patch may move the builder above it, but neither the module's
     #: minimum nor the builder may move below it in a coordinated downgrade.
-    MINIMUM_GO_VERSION = (1, 26, 8)
+    MINIMUM_GO_VERSION = (1, 26, 11)
 
     def test_builder_uses_reviewed_fixed_go_toolchain(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

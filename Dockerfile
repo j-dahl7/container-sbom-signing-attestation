@@ -1,6 +1,6 @@
 # Base images are locked to immutable manifest digests. Dependabot proposes
 # reviewed digest updates through .github/dependabot.yml.
-FROM golang:1.26.8-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
+FROM golang:1.26.11-alpine@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb AS builder
 
 WORKDIR /build
 
@@ -22,7 +22,7 @@ RUN go test ./... && \
         -X main.GitCommit=${GIT_COMMIT}" \
       -o /app .
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
 
 LABEL org.opencontainers.image.title="Supply Chain Demo"
 LABEL org.opencontainers.image.description="Demo app for supply chain security with signing and attestation"
