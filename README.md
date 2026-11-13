@@ -41,7 +41,7 @@ tests/                       Offline security contract tests
 
 ## Validate locally
 
-Python 3, Bash, Go 1.26.8+, and Docker are required. Trivy 0.74.0+ and Syft 1.52.0+ are required
+Python 3, Bash, Go 1.26.11+, and Docker are required. Trivy 0.74.0+ and Syft 1.52.0+ are required
 for the full local supply-chain exercise.
 
 ```bash
@@ -118,7 +118,7 @@ inputs; it does not remove the need to apply security updates promptly.
 The `go` directive records the oldest supported toolchain. The digest-pinned
 Docker builder may be newer, allowing an independent Docker Dependabot security
 update as long as it remains at or above both that module minimum and the
-reviewed Go 1.26.8 security baseline. This keeps the existing supported 1.26
+reviewed Go 1.26.11 security baseline. This keeps the existing supported 1.26
 series while incorporating its security and maintenance updates, rather than
 requiring a new major toolchain for this fix.
 
