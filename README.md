@@ -21,7 +21,9 @@ following mutable tags.
 - Publication is allowed only from `refs/heads/main` or a `v*` tag. A manual
   dispatch from any other ref is intentionally validation-only.
 - The publication job alone receives `packages: write`, `id-token: write`, and
-  `attestations: write`.
+  `attestations: write`. It does not receive `artifact-metadata: write`, so the
+  provenance step sets `create-storage-record: false` and requests no artifact
+  metadata storage record.
 - Verification is bound to this repository's exact
   `.github/workflows/supply-chain.yml` identity and to `main` or `v*` tags.
   A signature from some other GitHub workflow is not accepted.
@@ -81,6 +83,19 @@ provenance predicate all match the same exact workflow identity.
 Because registry evidence can appear moments after its image manifest, each
 read-only verification is retried up to five times with bounded exponential
 backoff. Persistently missing or invalid evidence still fails closed.
+
+Validation status, November 13, 2026: offline checks only for the current
+action pins. GitHub removed Node 20 from its Actions runners on September 23,
+2026, so the Docker build and metadata actions and
+`actions/attest-build-provenance` were moved to releases that declare Node 24,
+together with minor updates of the login and Buildx actions. The
+immutable-reference guard and the contract tests pass with these pins.
+Pull-request CI builds and scans the image with the new Buildx and build
+actions, but publication, signing, attestation, and this verification run only
+on `main` or a `v*` tag, so they had not run with the new pins when the change
+was prepared. The tested Cosign v3.0.6 baseline above was recorded with the
+earlier pins. The latest `Supply Chain Security` run on `main` shows the
+current result.
 
 ## Pipeline
 

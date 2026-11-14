@@ -136,6 +136,37 @@ class SupplyChainContractTests(unittest.TestCase):
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", workflow)
         self.assertNotIn("github.event_name != 'pull_request'", workflow)
 
+    def test_provenance_step_stays_within_documented_write_permissions(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
+        publish = re.search(r"(?ms)^  publish:\n(.*?)(?=^  \S|\Z)", workflow)
+        self.assertIsNotNone(publish, "publish job not found")
+
+        # The README promises that the publication job alone holds write
+        # permissions, and names exactly these three.
+        write_permission = r"(?m)^ +([a-z-]+): write$"
+        self.assertEqual(
+            sorted(re.findall(write_permission, publish.group(1))),
+            ["attestations", "id-token", "packages"],
+        )
+        self.assertEqual(
+            len(re.findall(write_permission, workflow)),
+            3,
+            "a write permission exists outside the publish job",
+        )
+
+        # actions/attest-build-provenance 3.1 and later also create an artifact
+        # metadata storage record after a registry push when the repository
+        # owner is an organization. That call needs artifact-metadata: write,
+        # which is not in the list above, so the record must stay off until
+        # both are changed together.
+        provenance = re.search(
+            r"(?ms)^      - name: Attach signed SLSA provenance\n(.*?)(?=^      - name: |\Z)",
+            publish.group(1),
+        )
+        self.assertIsNotNone(provenance, "provenance step not found")
+        self.assertRegex(provenance.group(1), r"(?m)^ +push-to-registry: true$")
+        self.assertRegex(provenance.group(1), r"(?m)^ +create-storage-record: false$")
+
     def test_all_action_and_base_image_refs_are_immutable(self) -> None:
         result = subprocess.run(
             [BASH, bash_path(ROOT / "scripts" / "check-pinned-refs.sh")],
